@@ -1,0 +1,102 @@
+# ZERO-MERCY Hall of Fame — GitHub Pages deploy
+#
+# Kya karta hai:
+#   repo ke root me jo bhi .zip mile, usko extract karke site publish kar deta hai.
+#   Zip na mile to repo ki files hi publish ho jati hain.
+#
+# Lagane ka tarika:
+#   1. Repo -> Add file -> Create new file
+#   2. File name: .github/workflows/deploy.yml
+#   3. Ye poora content paste karo -> Commit changes
+#   4. Settings -> Pages -> Source: GitHub Actions
+#
+# Uske baad: naya zip repo me upload karo -> site khud update ho jayegi.
+
+name: Deploy Hall of Fame
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare site
+        run: |
+          set -e
+          rm -rf dist
+          mkdir -p dist
+
+          # zip chuno: pehle site.zip, warna repo me jo ek zip ho
+          if [ -f site.zip ]; then
+            ZIP=site.zip
+          else
+            COUNT=$(ls -1 *.zip 2>/dev/null | wc -l)
+            if [ "$COUNT" -eq 1 ]; then
+              ZIP=$(ls -1 *.zip | head -n1)
+            elif [ "$COUNT" -gt 1 ]; then
+              echo "ERROR: repo me ek se zyada zip hain. Sirf ek zip rakho, ya uska naam site.zip rakho."
+              ls -1 *.zip
+              exit 1
+            else
+              ZIP=""
+            fi
+          fi
+
+          if [ -n "$ZIP" ]; then
+            echo "Zip mila: $ZIP — extract kar rahe hain"
+            unzip -o -q "$ZIP" -d dist
+          else
+            echo "Koi zip nahi mila — repo ki files publish kar rahe hain"
+            rsync -a --exclude '.git' --exclude 'dist' --exclude '*.zip' ./ dist/
+          fi
+
+          # agar index.html kisi folder ke andar hai to root par le aao
+          if [ ! -f dist/index.html ]; then
+            FOUND=$(find dist -maxdepth 3 -name index.html | head -n1 || true)
+            if [ -n "$FOUND" ]; then
+              DIR=$(dirname "$FOUND")
+              echo "index.html yahan mila: $DIR — root par shift kar rahe hain"
+              cp -r "$DIR"/. dist/
+            fi
+          fi
+
+          if [ ! -f dist/index.html ]; then
+            echo "ERROR: index.html nahi mila. Zip ke andar index.html hona chahiye."
+            ls -la dist
+            exit 1
+          fi
+
+          echo "Taiyar. Files:"
+          ls -la dist | head -n 20
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        
